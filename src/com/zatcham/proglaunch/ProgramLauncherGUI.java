@@ -1,11 +1,11 @@
 package com.zatcham.proglaunch;
 
 import com.formdev.flatlaf.FlatDarkLaf;
+import com.formdev.flatlaf.FlatLightLaf;
 
 import javax.swing.*;
 import javax.swing.Timer;
 import java.awt.*;
-import java.awt.event.ActionEvent;
 import java.io.*;
 import java.util.*;
 import java.util.List;
@@ -17,6 +17,7 @@ public class ProgramLauncherGUI extends JFrame {
     private String programFolder;
     private int launchInterval;
     private boolean darkMode;
+    private boolean shortcutsEnabled;
 
     private JList<String> programList;
     private JButton launchButton;
@@ -27,6 +28,7 @@ public class ProgramLauncherGUI extends JFrame {
     private JFileChooser fileChooser;
     private Preferences prefs = Preferences.userNodeForPackage(getClass());
     private Timer timer;
+    private JLabel timerLabel;
 
     public ProgramLauncherGUI() {
         setTitle("Program Launcher");
@@ -34,18 +36,24 @@ public class ProgramLauncherGUI extends JFrame {
         setSize(400, 300);
         setLocationRelativeTo(null);
 
-        FlatDarkLaf.setup();
+        programFolder = prefs.get("folder", System.getProperty("user.dir"));
+        launchInterval = prefs.getInt("interval", 3600);
+        darkMode = prefs.getBoolean("darkmode", true);
+        shortcutsEnabled = prefs.getBoolean("shortcuts", false);
+
+        System.out.println("Starting program - Settings: \n Folder: " + programFolder + "\n Timer Interval: " + launchInterval + "\n Dark Mode: " + darkMode + "\n Shortcuts Enabled: " + shortcutsEnabled);
+
         try {
-            UIManager.setLookAndFeel(new FlatDarkLaf());
+            if (darkMode) {
+                FlatDarkLaf.setup();
+                UIManager.setLookAndFeel(new FlatDarkLaf());
+            } else {
+                FlatLightLaf.setup();
+                UIManager.setLookAndFeel(new FlatLightLaf());
+            }
         } catch (UnsupportedLookAndFeelException e) {
             throw new RuntimeException(e);
         }
-
-        programFolder = prefs.get("folder", System.getProperty("user.dir"));
-        launchInterval = prefs.getInt("interval", 3600);
-        darkMode = prefs.getBoolean("darkmode", true); // TODO
-
-        System.out.println("Starting program - Settings: \n Folder: " + programFolder + "\n Timer Interval: " + launchInterval + "\n Dark Mode: " + darkMode);
 
         // TODO Display timer wait
         programList = new JList<>();
@@ -71,14 +79,15 @@ public class ProgramLauncherGUI extends JFrame {
                 launchButton.setText("Start");
                 timer.stop();
             } else {
-                timer.setDelay(launchInterval * 1000);
                 launchProgram();
+                timer.setDelay(launchInterval * 1000);
                 launchButton.setText("Stop");
                 System.out.println("Timer started - interval in ms " + launchInterval * 1000);
                 timer.start();
             }
         });
 //        timer.start();
+        timerLabel = new JLabel("Until next exec: ");
 
         JPanel panel = new JPanel(new BorderLayout());
         panel.add(new JScrollPane(programList), BorderLayout.CENTER);
@@ -87,6 +96,7 @@ public class ProgramLauncherGUI extends JFrame {
         buttonPanel.add(launchButton);
         buttonPanel.add(configButton);
         buttonPanel.add(listAvailableButton);
+//        buttonPanel.add(timerLabel); TODO
 
         panel.add(buttonPanel, BorderLayout.SOUTH);
 
@@ -105,16 +115,26 @@ public class ProgramLauncherGUI extends JFrame {
 
             File programFile = new File(programFolder, programToLaunch);
             if (programFile.exists()) {
-                try {
-                    ProcessBuilder processBuilder = new ProcessBuilder(programFile.getAbsolutePath());
-                    processBuilder.start();
-                } catch (IOException ex) {
-                    ex.printStackTrace();
+                if (programFile.getName().endsWith(".lnk")) {
+                    try {
+                        ProcessBuilder processBuilder = new ProcessBuilder("cmd", "/c", programFile.getAbsolutePath());
+                        processBuilder.start();
+                    } catch (IOException ex) {
+                        ex.printStackTrace();
+                    }
+                } else {
+                    try {
+                        ProcessBuilder processBuilder = new ProcessBuilder(programFile.getAbsolutePath());
+                        processBuilder.start();
+                    } catch (IOException ex) {
+                        ex.printStackTrace();
+                    }
                 }
             }
         } else {
             JOptionPane.showMessageDialog(null, "There are no more programs left to launch", "Prog Launcher", JOptionPane.INFORMATION_MESSAGE);
             timer.stop();
+            launchButton.setText("Start");
         }
     }
 
@@ -133,6 +153,13 @@ public class ProgramLauncherGUI extends JFrame {
         JButton browseButton = new JButton("Browse");
         JButton saveButton = new JButton("Save");
 
+        JToggleButton darkModeToggle = new JToggleButton("Dark Mode");
+        darkModeToggle.setSelected(darkMode);
+        darkModeToggle.addActionListener(e -> darkMode = darkModeToggle.isSelected());
+        JToggleButton shortcutsToggle = new JToggleButton("Shortcuts");
+        shortcutsToggle.addActionListener(e -> shortcutsEnabled = shortcutsToggle.isSelected());
+        shortcutsToggle.setSelected(shortcutsEnabled);
+
         browseButton.addActionListener(e -> browseFolder());
         saveButton.addActionListener(e -> saveConfig());
 
@@ -140,6 +167,8 @@ public class ProgramLauncherGUI extends JFrame {
         configDialog.add(intervalEdit);
         configDialog.add(folderLabel);
         configDialog.add(folderEdit);
+        configDialog.add(darkModeToggle);
+        configDialog.add(shortcutsToggle);
         configDialog.add(browseButton);
         configDialog.add(new JLabel()); // Empty label for alignment
         configDialog.add(saveButton);
@@ -152,6 +181,8 @@ public class ProgramLauncherGUI extends JFrame {
         launchInterval = Integer.parseInt(intervalEdit.getText()) * 60;
         programFolder = folderEdit.getText();
 
+        prefs.putBoolean("darkmode", darkMode);
+        prefs.putBoolean("shortcuts", shortcutsEnabled);
         prefs.put("folder", programFolder);
         prefs.putInt("interval", launchInterval);
     }
@@ -185,9 +216,11 @@ public class ProgramLauncherGUI extends JFrame {
         DefaultListModel<String> listModel = (DefaultListModel<String>) programList.getModel();
         runningList.setModel(listModel);
 
-        for (String program : runningPrograms) {
-            listModel.addElement(program);
-        }
+        String program = runningPrograms.get(runningPrograms.size() - 1);
+        listModel.addElement(program);
+//        for (String program : runningPrograms) {
+//            listModel.addElement(program);
+//        }
     }
 
     private List<String> getAvailablePrograms(String directory) {
@@ -197,6 +230,14 @@ public class ProgramLauncherGUI extends JFrame {
         if (exeFiles != null) {
             for (File file : exeFiles) {
                 availablePrograms.add(file.getName());
+            }
+        }
+        if (shortcutsEnabled) {
+            File[] lnkFiles = currentDir.listFiles((dir, name) -> name.endsWith(".lnk"));
+            if (lnkFiles != null) {
+                for (File file : lnkFiles) {
+                    availablePrograms.add(file.getName());
+                }
             }
         }
         return availablePrograms;
